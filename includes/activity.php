@@ -4,43 +4,51 @@ require_once('../veeam.class.php');
 
 session_start();
 
-$veeam = new VBO($host, $port);
-$veeam->setToken($_SESSION['token']);
+$veeam = new VBO($host, $port, $version);
 
-$sessions = $veeam->getSessions();
-$time = array();
+if (isset($_SESSION['token'])) {
+    $veeam->setToken($_SESSION['token']);
+} 
 
-for ($i = 0; $i < count($sessions['results']); $i++) {
-    array_push($time, array('name'=> $sessions['results'][$i]['name'], 'organization' => $sessions['results'][$i]['organization'], 'result' => $sessions['results'][$i]['result'], 'creationTime' => $sessions['results'][$i]['creationTime'], 'endTime' => $sessions['results'][$i]['endTime'], 'id' => $sessions['results'][$i]['id']));
+if (isset($_SESSION['refreshtoken'])) {
+    $veeam->refreshToken($_SESSION['refreshtoken']);
 }
 
-usort($time, function($a, $b) { /* Sort the default list by start time (last one first) */
-  $ad = new DateTime($a['creationTime']);
-  $bd = new DateTime($b['creationTime']);
+if (isset($_SESSION['token'])) {
+    $user = $_SESSION['user'];
+	
+	$sessions = $veeam->getSessions();
+	$time = array();
 
-  if ($ad == $bd) {
-    return 0;
-  }
+	for ($i = 0; $i < count($sessions['results']); $i++) {
+		array_push($time, array('name'=> $sessions['results'][$i]['name'], 'organization' => $sessions['results'][$i]['organization'], 'result' => $sessions['results'][$i]['result'], 'creationTime' => $sessions['results'][$i]['creationTime'], 'endTime' => $sessions['results'][$i]['endTime'], 'id' => $sessions['results'][$i]['id']));
+	}
 
-  return $ad > $bd ? -1 : 1;
-});
+	usort($time, function($a, $b) { /* Sort the default list by start time (last one first) */
+		$ad = new DateTime($a['endTime']);
+		$bd = new DateTime($b['endTime']);
+	  
+		if ($ad == $bd)
+			return 0;
+
+		return $ad > $bd ? -1 : 1;
+	});
 ?>
 <div class="main-container">
-    <h1>History: restore sessions</h1>
-    <input class="form-control search-hover" id="filter-history" placeholder="Filter history..." />
-    <br />
+    <h1>Activity log</h1>
     <?php
-    if (count($sessions) != '0') {
+    if (count($sessions['results']) != '0') {
     ?>
-    <table class="table table-bordered table-padding table-striped" id="table-sessions">
+	<input class="form-control search" id="filter-activity" placeholder="Filter activity..." />
+    <table class="table table-hover table-bordered table-striped table-border" id="table-sessions">
         <thead>
             <tr>
-                <th><strong>Name</strong></th>
-                <th><strong>Organization</strong></th>
-                <th><strong>Status</strong></th>
-                <th><strong>Start Time</strong></th>
-                <th><strong>End Time</strong></th>
-                <th class="text-center"><strong>Details</strong></th>
+                <th>Name</th>
+                <th>Organization</th>
+                <th>Status</th>
+                <th>Start Time</th>
+                <th>End Time</th>
+                <th class="text-center">Session Log</th>
             </tr>
         </thead>
         <tbody>
@@ -59,8 +67,8 @@ usort($time, function($a, $b) { /* Sort the default list by start time (last one
                 }
                 ?>
                 </td>
-                <td><?php echo date('d/m/Y H:i T', strtotime($value['creationTime'])); ?></td>
-                <td><?php echo date('d/m/Y H:i T', strtotime($value['endTime'])); ?></td>
+                <td><?php echo date('d/m/Y H:i', strtotime($value['creationTime'])); ?></td>
+                <td><?php echo date('d/m/Y H:i', strtotime($value['endTime'])); ?></td>
                 <td class="text-center"><a href="#" class="item" data-sessionid="<?php echo $value['id']; ?>" onClick="return false;">View</a></td>
                 </tr>
             <?php
@@ -70,7 +78,7 @@ usort($time, function($a, $b) { /* Sort the default list by start time (last one
     </table>
 <?php
 } else {
-    echo 'No restore sessions found.';
+    echo '<p>No restore sessions found.</p>';
 }
 
 /* If we have 30 items from the first request, show message to load additional items */
@@ -84,29 +92,34 @@ if (count($sessions['results']) == '30') {
 ?>
 </div>
 
-<div class="ui modal modalsessioninfo">
-    <div class="header">Session info</div>
-    <div class="scrolling content">
+<div class="modal" id="sessionModalCenter" role="dialog">
+    <div class="modal-dialog" role="document">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h1 class="modal-title">Session info</h1>
+      </div>
+      <div class="modal-body">
         <table class="table table-bordered table-padding table-striped" id="table-session-content">
             <thead>
                 <tr>
-                    <th>Message</th>
+                    <th>Action</th>
                     <th>Duration</th>
                 </tr>
             </thead>
             <tbody>
             </tbody>
         </table>
-        <br />
+      </div>
+	  <div class="modal-footer">
+        <button type="button" class="btn btn-success" data-dismiss="modal">Close</button>
+      </div>
     </div>
-    <div class="actions text-center">
-        <div class="ui positive button">Close</div>
-    </div>
+  </div>
 </div>
 
 <script>
-/* Filter history */
-$("#filter-history").keyup(function(e) {
+/* Filter activity */
+$("#filter-activity").keyup(function(e) {
     var searchText = $(this).val().toLowerCase();
     /* Show only matching row, hide rest of them */
     $.each($("#table-sessions tbody tr"), function(e) {
@@ -119,42 +132,40 @@ $("#filter-history").keyup(function(e) {
 });
 
 /* Session window */
-$(document).on('click', '.item', function(e) {
+$(document).on("click", ".item", function(e) {
     var icon, text;
-    var id = $(this).data('sessionid');
+    var id = $(this).data("sessionid");
     
-    $.get('veeam.php', {'action' : 'getsessionlog', 'id' : id}).done(function(data) {
+    $.get("veeam.php", {"action" : "getsessionlog", "id" : id}).done(function(data) {
         response = JSON.parse(data);
 
         $('#table-session-content tbody').empty();
         
         for (var i = 0; i < response.results.length; i++) {
-            if (response.results[i].status == 'Success') { /* Success icon */
+            if (response.results[i].status == "Success") { /* Success icon */
                 icon = 'check-circle';
                 text = 'success';
-            } else if (response.results[i].status == 'Warning') { /* Warning icon */
+            } else if (response.results[i].status == "Warning") { /* Warning icon */
                 icon = 'exclamation-triangle';
                 text = 'warning';
             } else { /* Failed icon */
                 icon = 'times-circle';
                 text = 'danger';
             }
+			
             $('#table-session-content tbody').append('<tr> \
-                    <td><span class="fa fa-'+icon+' text-'+text+'"></span> ' + response.results[i].message + '</td> \
-                    <td>' + response.results[i].duration + '</td> \
+                    <td><span class="fa fa-'+icon+' text-'+text+'" title="'+text.charAt(0).toUpperCase() + text.slice(1) +'"></span> ' + response.results[i].message + '</td> \
+                    <td>' + response.results[i].duration.substring(0,8) + '</td> \
                     </tr>');
         }
                 
-        $('.modalsessioninfo.modal').modal({
-            centered : true,
-            closable : true,
-        }).modal('show');
+        $('#sessionModalCenter').modal('show');
     });
 });
 
 /* Load more link */
-$(document).on('click', '.load-more-link', function(e) {
-    var offset = $(this).data('offset');
+$(document).on("click", ".load-more-link", function(e) {
+    var offset = $(this).data("offset");
 
     loadSessions(offset);
 });
@@ -165,7 +176,7 @@ $(document).on('click', '.load-more-link', function(e) {
 function loadSessions(offset) {
     var result, status;
 
-    $.get('veeam.php', {'action' : 'getsessions', 'offset' : offset}).done(function(data) {
+    $.get("veeam.php", {"action" : "getsessions", "offset" : offset}).done(function(data) {
         var response = JSON.parse(data);
 
         for (var i = 0; i < response.results.length; i++) {
@@ -187,6 +198,23 @@ function loadSessions(offset) {
                         <td class="text-center"><a href="#" class="item" data-sessionid="' + response.results[i].id + '" onClick="return false;">View</a></td> \
                         </tr>');
         }
-    });//27/07/2018 13:22 CEST vs 28 Jul 2018 15:51
+    });
 }
 </script>
+<?php
+} else {
+    unset($_SESSION);
+    session_destroy();
+	?>
+	<script>
+	Swal.fire({
+		type: 'info',
+		title: 'Session terminated',
+		text: 'Your session has timed out and requires you to login again.'
+	}).then(function(e) {
+		window.location.href = '/index.php';
+	});
+	</script>
+	<?php
+}
+?>
